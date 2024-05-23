@@ -86,45 +86,69 @@ abstract class ValidatedDTO extends SimpleDTO
     abstract protected function rules(): array;
 
     /**
-     * Builds the validated data from the given data and the rules.
+     * Handles a passed validation attempt.
      *
      * @throws MissingCastTypeException|CastTargetException
      */
-    protected function validatedData(): array
+    protected function passedValidation(): void
     {
         $acceptedKeys = array_keys($this->rulesList());
-        $result = [];
 
         /** @var array<Castable> $casts */
         $casts = $this->buildCasts();
 
         foreach ($this->data as $key => $value) {
             if (in_array($key, $acceptedKeys)) {
-                if (! array_key_exists($key, $casts)) {
+                if (!array_key_exists($key, $casts)) {
                     if ($this->requireCasting) {
                         throw new MissingCastTypeException($key);
                     }
-                    $result[$key] = $value;
+                    $this->validatedData[$key] = $value;
 
                     continue;
                 }
 
-                $result[$key] = $this->shouldReturnNull($key, $value)
-                    ? null
+                $this->validatedData[$key] = $this->shouldReturnNull($key, $value)
+                    ? $value
                     : $this->castValue($casts[$key], $key, $value);
+            }
+        }
+
+        $defaults = [
+            ...$this->defaults(),
+            ...$this->dtoDefaults,
+        ];
+
+        foreach ($defaults as $key => $value) {
+            $key = (string)$key;
+            if (
+                empty($this->validatedData[$key])
+            ) {
+                if (!array_key_exists($key, $casts)) {
+                    if ($this->requireCasting) {
+                        throw new MissingCastTypeException($key);
+                    }
+                    $this->validatedData[$key] = $value;
+
+                    continue;
+                }
+
+                $this->validatedData[$key] = $this->castValue($casts[$key], $key, $value);
             }
         }
 
         foreach ($acceptedKeys as $property) {
             if (
-                ! array_key_exists($property, $result)
+                !array_key_exists($property, $this->validatedData)
                 && $this->isOptionalProperty($property)
             ) {
-                $result[$property] = null;
+                $this->validatedData[$property] = null;
             }
         }
 
-        return $result;
+        foreach ($this->validatedData as $key => $value) {
+            $this->{$key} = $value;
+        }
     }
 
     protected function isValidData(): bool
@@ -155,7 +179,7 @@ abstract class ValidatedDTO extends SimpleDTO
 
     protected function shouldReturnNull(string $key, mixed $value): bool
     {
-        return is_null($value) && $this->isOptionalProperty($key);
+        return empty($value) && $this->isOptionalProperty($key);
     }
 
     private function rulesList(): array
